@@ -1,0 +1,147 @@
+---
+title: "PUBH 7462 Homework 3"
+author: "Christopher Rounds"
+date: "2/13/2022"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(gt)
+instacart <- read.csv("./data/instacart.csv")
+
+options(digits = 3)
+```
+
+# 3.1) Summary Statistics
+```{r summary, message=FALSE}
+instacart %>% 
+  group_by(user_id, order_id) %>%
+  summarise(days_since_prior_order = mean(days_since_prior_order), 
+            #could use unique, we just need something that gives us one value
+            n_items = sum(n()), #counts the items in the order
+            n_aisles = n_distinct(aisle_id), #counts the number of different aisles
+            order_number = mean(order_number), # once again could use unique 
+            n_departments = n_distinct(department),  # number of different depts visited
+            reordered = mean(reordered)) %>% # this needs to be the mean
+  mutate(reordered = 100*reordered) %>% #change reordered to be a percent
+  ungroup() %>% 
+  rename(`Days since last order` = days_since_prior_order, #rename the variables to be informative
+         `Number of aisles in order` = n_aisles,
+         `Number of departments in order` = n_departments,
+         `Number of items ordered` = n_items,
+         `Order number` = order_number,
+         `Percent of items previously ordered` = reordered) %>%
+  pivot_longer(cols = contains(c(" ")), 
+                               names_to = "Measure", 
+                               values_to = "measurement") %>% 
+  # I tried to do this with summarise(across()) but for the life of me couldn't figure out how to reformat the gt table to be useful so I decided to pivot the variables to rows
+  group_by(Measure) %>% # group variables to calculate statistics
+  summarise(Mean = mean(measurement, na.rm = TRUE),
+            Median = median(measurement, na.rm = TRUE),
+            `Standard Deviation` = sd(measurement, na.rm = TRUE)) %>%
+  gt() %>%
+  tab_header("Summary Statistics for Instacart Orders") %>%
+  as_raw_html()
+  
+
+```
+
+# 3.2) Orders per Aisle
+```{r ordersperaisle, message = FALSE, fig.height=20, fig.width=30}
+instacart %>% 
+  group_by(aisle) %>%
+  summarise(items = sum(n())) %>% #count number of items per aisle
+  ungroup() %>% #ungroup to reorder
+  mutate(aisle = factor(str_to_title(aisle)), #change aisle string to capitals
+         aisle = fct_reorder(aisle, items, max, .desc = TRUE)) %>% 
+  #reorder aisles based on sales
+  ggplot(aes(x = as.factor(aisle), y = items, fill = aisle)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Sales by Aisle from Instacart", y = "Number of sales", 
+       x = "Aisle", fill = "Aisle") + #give titles
+  guides(fill = guide_legend(ncol = 5)) +
+  theme(plot.title = element_text(size = 40, face = "bold", hjust = 0.5), #change size of text
+        axis.text = element_text(size = 15),
+        axis.title = element_text(size = 25, face = "bold"),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        #legend.key.size = unit(0.5, 'cm'), #change legend key size
+        legend.key.height = unit(.2, 'cm'), #change legend key height
+        legend.key.width = unit(.1, 'cm'), #change legend key width
+        legend.title = element_text(size = 25), #change legend title font size
+        legend.text = element_text(size = 15)) #change legend text font size)
+```
+
+# 3.3) Top 6 aisles in the top 6 departments by items purchased
+```{r topdepts, message = FALSE, fig.height=20, fig.width=30}
+top_depts <- instacart %>% group_by(department) %>%
+  summarise(items_sold = sum(n())) %>%
+  arrange(desc(items_sold)) %>%
+  slice(1:6) #select top 6 departments by items sold
+
+instacart %>% 
+  dplyr::filter(department %in% top_depts$department) %>% #filter out depts we don't want
+  group_by(department, aisle) %>%
+  summarise(items = sum(n())) %>%
+  arrange(desc(items))  %>%
+  slice(1:6) %>% #chose the aisles/depts with most item sales
+  ungroup() %>%
+  mutate(aisle = factor(str_to_title(aisle)), #change aisle string to capitals
+         department = factor(str_to_title(department)),
+         department = fct_reorder2(department, aisle, items),
+         aisle = fct_reorder2(aisle, department, items)) %>%
+  ggplot(aes(x = as.factor(aisle), y = items, fill = aisle)) +
+  geom_bar(stat = "identity") +
+  facet_grid(. ~ department, scales = "free_x") +  # 2 grids separated by the measurement type
+  labs(title = "Sales by aisle and department from Instacart", 
+       subtitle = "Aisles are seperated into department", y = "Number of sales", 
+       x = "Aisle", fill = "Aisle") + #give titles
+  theme(plot.title = element_text(size = 60, face = "bold", hjust = 0.5), #change size of text
+        plot.subtitle = element_text(size = 40, hjust = 0.5),
+        axis.text = element_text(size = 25),
+        axis.title = element_text(size = 40, face = "bold"),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.text = element_text(size = 40),
+        #legend.key.size = unit(0.5, 'cm'), #change legend key size
+        legend.key.height = unit(2, 'cm'), #change legend key height
+        legend.key.width = unit(.5, 'cm'), #change legend key width
+        legend.title = element_text(size = 30), #change legend title font size
+        legend.text = element_text(size = 30)) #change legend text font size)
+
+
+
+```
+  
+# 3.4) Top 5 products in the top 5 aisles by items purchased
+```{r topproducts, message = FALSE}
+top_aisles <- instacart %>% group_by(aisle) %>%
+  summarise(items_sold = sum(n())) %>% #number of products sold per aisle
+  arrange(desc(items_sold)) %>% #sort by numb sold
+  slice(1:5) #select top 5 aisles by items sold
+
+instacart %>% 
+  dplyr::filter(aisle %in% top_aisles$aisle) %>% #filter out aisles we don't want
+  group_by(aisle, product_name) %>%
+  summarise(items = sum(n())) %>% # count the number of each product sold
+  arrange(desc(items))  %>%
+  slice(1:5) %>% # chose the aisles/depts with most item sales
+  ungroup() %>% #ungroup to fct_recode
+  mutate(aisle = factor(str_to_title(aisle)), # change aisle string to capitals
+         product_name = factor(product_name), 
+         product_name = fct_reorder2(product_name, aisle, items), 
+         #reorder factors so table is pretty
+         aisle = fct_reorder2(aisle, product_name, items)) %>%
+  group_by(aisle) %>% #regroup for gt
+  rename(`Number of sales` = items, 
+         `Product` = product_name) %>% #rename variables to be legible
+  gt() %>%
+  tab_header("Top 5 Items by Aisle") %>%
+  data_color(columns = `Number of sales`,
+    colors = scales::col_numeric(
+      palette = c("white", "red"),
+      domain  = c(0, max(`Number of sales`)))) %>%
+# largest values will be red, smaller will be more white
+  as_raw_html()
+```
